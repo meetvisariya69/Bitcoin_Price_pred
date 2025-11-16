@@ -9,7 +9,7 @@ import numpy as np
 # --- Configuration ---
 TICKER_SYMBOL = 'BTC-USD'
 FORECAST_DAYS = 14
-DATA_PERIOD_HISTORY = '3y' # For model training (3 years of daily data)
+DATA_PERIOD_HISTORY = '3y' # For stable ARIMA training (3 years of daily data)
 DATA_PERIOD_LIVE = '1d'    # For fetching the most recent data
 DATA_INTERVAL_LIVE = '1m'  # For fetching minute-level data
 
@@ -45,16 +45,17 @@ def get_most_recent_price(ticker):
             return latest_price, latest_time
         return None, None
     except Exception as e:
+        # This warning is useful if the yfinance server times out
         st.warning(f"Could not retrieve most recent price: {e}")
         return None, None
 
-@st.cache_resource(ttl=60*60*12) # Cache model training for 12 hours
+@st.cache_resource(ttl=60*60*12) # Cache model training for 12 hours to speed up subsequent loads
 def train_and_forecast(df, n_periods):
     """Trains the ARIMA model and generates a forecast."""
     if df.empty:
         return pd.DataFrame(), None
 
-    with st.spinner('Training ARIMA model...'):
+    with st.spinner('Training ARIMA model... This may take a moment on first run.'):
         try:
             # Auto_arima finds the best (p, d, q) parameters
             model = auto_arima(df['Close'], seasonal=False, stepwise=True,
@@ -99,7 +100,7 @@ def main():
                       value=f"${latest_price:,.2f}", 
                       delta=f"As of {latest_time.strftime('%Y-%m-%d %H:%M %Z')}")
         else:
-            st.warning("Could not fetch a recent price.")
+            st.warning("Could not fetch a recent price. Using historical data for prediction.")
             
     # 2. Load Historical Data and Train Model
     historical_df = load_historical_data(TICKER_SYMBOL)
@@ -111,7 +112,6 @@ def main():
     with col2:
         st.success(f"Historical data loaded successfully! ({DATA_PERIOD_HISTORY} of data, ending {historical_df.index[-1].strftime('%Y-%m-%d')})")
         st.caption("Model is trained on daily data. The forecast is **daily** for 14 days.")
-
 
     # 3. Train Model and Forecast
     forecast_df, model = train_and_forecast(historical_df, FORECAST_DAYS)
@@ -134,18 +134,6 @@ def main():
     ## Combined Plot
     st.header("📈 Historical Data vs. 14-Day Forecast")
 
-    # Prepare data for plotting
-    plot_df = historical_df.copy()
-    
-    # Create a full DataFrame combining historical and forecast data
-    # Create columns for the forecast in the historical data, filled with NaN
-    forecast_cols = ['Predicted Price', 'Lower Bound (95%)', 'Upper Bound (95%)']
-    for col in forecast_cols:
-        plot_df[col] = np.nan
-
-    # Append the forecast data for a continuous plot
-    full_plot_df = pd.concat([plot_df, forecast_df[forecast_cols]], axis=0)
-    
     # Plotting using Matplotlib
     fig, ax = plt.subplots(figsize=(14, 6))
     
@@ -170,28 +158,6 @@ def main():
     plt.tight_layout()
     
     st.pyplot(fig)
-    
-    st.markdown("---")
-
-    # 5. Deployment Info
-    st.sidebar.header("Deployment Checklist")
-    st.sidebar.markdown(
-        """
-        1. **Save** this code as `app.py`.
-        2. Create a file named **`requirements.txt`** with the content below.
-        3. Push both files to a **public GitHub repository**.
-        4. Connect the repository to **Streamlit Community Cloud** and deploy.
-        """
-    )
-    st.sidebar.subheader("`requirements.txt` Content")
-    st.sidebar.code("""
-streamlit
-pandas
-yfinance
-pmdarima
-matplotlib
-numpy
-""")
     
 if __name__ == '__main__':
     main()
